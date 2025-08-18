@@ -1,67 +1,30 @@
 import streamlit as st
 import random
 
-st.set_page_config(page_title="남자아이돌 이상형 월드컵", layout="centered")
+st.set_page_config(page_title="숫자 맞히기 게임", layout="centered")
 
-st.title("🌟 남자아이돌 이상형 월드컵 🌟")
+st.title("🎲 숫자 맞히기 게임")
 
-# 아이돌 후보 (이름 + 이미지 URL)
-idols = [
-    ("정국(BTS)", "https://i.imgur.com/3XbI7.jpg"),
-    ("차은우(아스트로)", "https://i.imgur.com/9XcG5.jpg"),
-    ("태민(샤이니)", "https://i.imgur.com/4rfg8.jpg"),
-    ("지민(BTS)", "https://i.imgur.com/j9r7c.jpg"),
-    ("민호(샤이니)", "https://i.imgur.com/VlKqM.jpg"),
-    ("백현(EXO)", "https://i.imgur.com/kEr5K.jpg"),
-    ("카이(EXO)", "https://i.imgur.com/Vzcd7.jpg"),
-    ("RM(BTS)", "https://i.imgur.com/nKn5H.jpg"),
-    ("진(BTS)", "https://i.imgur.com/Y3sH3.jpg"),
-    ("재현(NCT)", "https://i.imgur.com/AD9qB.jpg"),
-    ("도영(NCT)", "https://i.imgur.com/f9hQ2.jpg"),
-    ("보검(배우)", "https://i.imgur.com/Er0pN.jpg"),
-    ("영빈(SF9)", "https://i.imgur.com/f9w7r.jpg"),
-    ("차훈(N.Flying)", "https://i.imgur.com/0fdfR.jpg"),
-    ("은혁(슈퍼주니어)", "https://i.imgur.com/Qk2rP.jpg"),
-    ("시우민(EXO)", "https://i.imgur.com/2c9Lg.jpg")
-]
+# 초기 상태 설정
+if "secret" not in st.session_state:
+    st.session_state.secret = random.randint(1, 100)
+    st.session_state.tries = 0
 
-# 상태 저장
-if "round" not in st.session_state:
-    random.shuffle(idols)
-    st.session_state.round = idols
-    st.session_state.winners = []
-    st.session_state.stage = 1
+st.write("1부터 100 사이의 숫자를 맞혀보세요!")
 
-# 현재 라운드 표시
-round_names = {16: "16강", 8: "8강", 4: "4강", 2: "결승"}
-round_size = len(st.session_state.round)
+# 사용자 입력
+user_input = st.number_input("숫자를 입력하세요", min_value=1, max_value=100, step=1)
 
-if round_size > 1:
-    st.subheader(f"🔥 {round_names[round_size]} - {st.session_state.stage}라운드")
-
-    left, right = st.columns(2)
-    idol1 = st.session_state.round[0]
-    idol2 = st.session_state.round[1]
-
-    with left:
-        st.image(idol1[1], width=250)
-        st.button(idol1[0], on_click=lambda: st.session_state.winners.append(idol1))
-
-    with right:
-        st.image(idol2[1], width=250)
-        st.button(idol2[0], on_click=lambda: st.session_state.winners.append(idol2))
-
-    # 버튼 클릭 시 진행
-    if len(st.session_state.winners) > 0 and (len(st.session_state.winners) + round_size - 2) % 2 == 0:
-        st.session_state.round = st.session_state.round[2:]
-
-        if len(st.session_state.round) == 0:
-            st.session_state.round = st.session_state.winners
-            st.session_state.winners = []
-            st.session_state.stage += 1
+if st.button("도전!"):
+    st.session_state.tries += 1
+    if user_input < st.session_state.secret:
+        st.warning("🔼 더 큰 숫자입니다!")
+    elif user_input > st.session_state.secret:
+        st.warning("🔽 더 작은 숫자입니다!")
+    else:
+        st.success(f"🎉 정답! {st.session_state.secret} 를 맞히셨어요!")
+        st.info(f"시도 횟수: {st.session_state.tries} 번")
+        if st.button("다시 시작하기"):
+            st.session_state.secret = random.randint(1, 100)
+            st.session_state.tries = 0
             st.experimental_rerun()
-
-elif round_size == 1:
-    winner = st.session_state.round[0]
-    st.success(f"🏆 최종 우승자는 {winner[0]} 입니다!")
-    st.image(winner[1], width=300)
