@@ -11,6 +11,21 @@ st.markdown(
         background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);
         color: white;
     }
+    /* 배경에 숫자 이미지 추가 */
+    body::before {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-image: url('https://i.imgur.com/Z3r7Q9E.png');
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-position: center;
+        opacity: 0.15;
+        z-index: -1;
+    }
     .title {
         font-size: 40px !important;
         font-weight: bold;
