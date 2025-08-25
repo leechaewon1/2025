@@ -1,0 +1,286 @@
+# app.py
+import time
+import random
+import math
+from collections import defaultdict
+import streamlit as st
+import pandas as pd
+
+st.set_page_config(page_title="🐎 미니 경마 토토", page_icon="🐎", layout="centered")
+
+# -----------------------------
+# 초기 상태
+# -----------------------------
+def init_state():
+    if "balance" not in st.session_state:
+        st.session_state.balance = 1000  # 시작 코인
+    if "horses" not in st.session_state:
+        st.session_state.horses = [
+            {"name": "번개", "rating": 1.00},
+            {"name": "태풍", "rating": 1.03},
+            {"name": "질주", "rating": 0.98},
+            {"name": "천둥", "rating": 1.01},
+            {"name": "난추", "rating": 0.96},
+            {"name": "야성", "rating": 1.05},
+        ]
+    if "user_bets" not in st.session_state:
+        st.session_state.user_bets = defaultdict(int)
+    if "bot_pool" not in st.session_state:
+        st.session_state.bot_pool = defaultdict(int)
+    if "race_in_progress" not in st.session_state:
+        st.session_state.race_in_progress = False
+    if "history" not in st.session_state:
+        st.session_state.history = []  # [(winner, payout, net)]
+    if "last_odds" not in st.session_state:
+        st.session_state.last_odds = {}
+
+init_state()
+
+# -----------------------------
+# 유틸
+# -----------------------------
+def total_pool(user_bets, bot_pool):
+    return sum(user_bets.values()) + sum(bot_pool.values())
+
+def compute_odds(user_bets, bot_pool):
+    pool = total_pool(user_bets, bot_pool)
+    odds = {}
+    for h in [x["name"] for x in st.session_state.horses]:
+        bet_on_h = user_bets[h] + bot_pool[h]
+        if bet_on_h > 0:
+            odds[h] = pool / bet_on_h  # 1코인 배팅 시 예상 배당(소수배당)
+        else:
+            odds[h] = None
+    return odds
+
+def simulate_bots(user_bets):
+    """사용자 베팅이 끝난 뒤, 봇들이 베팅을 채워 넣어 배당이 자연스러워지게 합니다."""
+    bot_pool = defaultdict(int)
+    base_total = random.randint(600, 2000)  # 봇 전체 베팅 코인
+    # rating이 높을수록 선호 가중치 ↑
+    weights = []
+    for h in st.session_state.horses:
+        # 약간의 노이즈로 한 판마다 선호 변동
+        w = max(0.1, h["rating"] + random.uniform(-0.03, 0.05))
+        weights.append(w)
+    s = sum(weights)
+    probs = [w / s for w in weights]
+    amounts = [int(max(0, round(base_total * p + random.uniform(-10, 10)))) for p in probs]
+    # 라운딩 보정
+    diff = base_total - sum(amounts)
+    if amounts:
+        amounts[0] += diff
+    for (h, amt) in zip([x["name"] for x in st.session_state.horses], amounts):
+        bot_pool[h] += max(0, amt)
+    return bot_pool
+
+def reset_bets(keep_balance=True):
+    if keep_balance:
+        bal = st.session_state.balance
+    st.session_state.user_bets = defaultdict(int)
+    st.session_state.bot_pool = defaultdict(int)
+    st.session_state.last_odds = {}
+    st.session_state.race_in_progress = False
+    if keep_balance:
+        st.session_state.balance = bal
+
+# -----------------------------
+# 헤더
+# -----------------------------
+st.title("🐎 미니 경마 토토 (가상 코인)")
+st.caption("실제 돈은 사용하지 않는 경마 시뮬레이션 게임입니다. 즐겁고 책임감 있게 플레이하세요!")
+
+# -----------------------------
+# 베팅 섹션
+# -----------------------------
+col_a, col_b = st.columns([1, 1])
+with col_a:
+    st.subheader("보유 코인")
+    st.metric("잔액", f"{st.session_state.balance:,} 🪙")
+
+with col_b:
+    st.subheader("트랙/마필 정보")
+    df_h = pd.DataFrame(
+        [{"말": h["name"], "레이팅": h["rating"]} for h in st.session_state.horses]
+    )
+    st.dataframe(df_h, use_container_width=True, hide_index=True)
+
+st.divider()
+st.subheader("베팅")
+
+horse_names = [h["name"] for h in st.session_state.horses]
+sel = st.selectbox("말을 고르세요", options=horse_names, index=0)
+amt = st.number_input("베팅 코인", 1, 10_000, 50, step=10)
+
+bet_cols = st.columns([1, 1, 1])
+with bet_cols[0]:
+    if st.button("베팅 추가"):
+        if st.session_state.balance >= amt:
+            st.session_state.user_bets[sel] += int(amt)
+            st.session_state.balance -= int(amt)
+            st.success(f"✅ {sel} 에 {int(amt)} 코인 베팅 완료!")
+        else:
+            st.error("잔액이 부족합니다.")
+
+with bet_cols[1]:
+    if st.button("해당 말 베팅 취소"):
+        bet_back = st.session_state.user_bets[sel]
+        if bet_back > 0:
+            st.session_state.balance += bet_back
+            st.session_state.user_bets[sel] = 0
+            st.info(f"↩️ {sel}에 베팅한 {bet_back} 코인을 돌려받았습니다.")
+        else:
+            st.warning("해당 말에 베팅이 없습니다.")
+
+with bet_cols[2]:
+    if st.button("전체 베팅 초기화"):
+        refunded = sum(st.session_state.user_bets.values())
+        st.session_state.balance += refunded
+        reset_bets(keep_balance=True)
+        st.info(f"모든 베팅을 취소하고 {refunded} 코인을 환불했습니다.")
+
+# 현재 베팅 현황
+st.markdown("#### 현재 베팅 (사용자)")
+df_bets = pd.DataFrame(
+    [{"말": h, "베팅": st.session_state.user_bets[h]} for h in horse_names]
+)
+df_bets.loc["합계"] = ["합계", df_bets["베팅"].sum()]
+st.dataframe(df_bets, use_container_width=True)
+
+# -----------------------------
+# 레이스 & 배당 계산
+# -----------------------------
+st.divider()
+st.subheader("레이스 & 배당")
+
+track_len = st.slider("트랙 길이 (단위: 진행률)", min_value=50, max_value=150, value=100, step=10)
+tick_delay = st.slider("틱 지연(애니메이션 속도, 초)", 0.01, 0.2, 0.05, step=0.01)
+
+col_run = st.columns([1, 1, 1])
+with col_run[0]:
+    gen_bots = st.button("컴퓨터 베팅 생성")
+with col_run[1]:
+    start_race = st.button("🏁 레이스 시작")
+with col_run[2]:
+    new_round = st.button("다음 라운드 준비")
+
+# 봇 베팅 생성
+if gen_bots and not st.session_state.race_in_progress:
+    st.session_state.bot_pool = simulate_bots(st.session_state.user_bets)
+    st.success("🤖 컴퓨터 베팅이 추가되었습니다.")
+
+# 배당(예상) 표시
+odds = compute_odds(st.session_state.user_bets, st.session_state.bot_pool)
+st.session_state.last_odds = odds
+
+df_odds = pd.DataFrame(
+    [{
+        "말": h,
+        "사용자 베팅": st.session_state.user_bets[h],
+        "컴퓨터 베팅": st.session_state.bot_pool[h],
+        "합계": st.session_state.user_bets[h] + st.session_state.bot_pool[h],
+        "예상 배당(1코인당)": (f"{odds[h]:.2f}" if odds[h] else "-"),
+    } for h in horse_names]
+)
+df_odds.loc["합계"] = [
+    "합계",
+    df_odds["사용자 베팅"].replace("-", 0).sum(),
+    df_odds["컴퓨터 베팅"].replace("-", 0).sum(),
+    df_odds["합계"].replace("-", 0).sum(),
+    "",
+]
+st.dataframe(df_odds, use_container_width=True, hide_index=True)
+
+# -----------------------------
+# 레이스 시뮬레이션
+# -----------------------------
+def run_race():
+    st.session_state.race_in_progress = True
+    # 프로그레스 바 준비
+    bars = {}
+    labels = {}
+    ph = st.empty()
+    with ph.container():
+        for h in horse_names:
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                bars[h] = st.progress(0, text=f"🐎 {h}")
+            with c2:
+                labels[h] = st.empty()
+
+    # 말 상태
+    pos = {h["name"]: 0.0 for h in st.session_state.horses}
+    # 레이팅을 속도 가중치로 반영
+    base_speed = {h["name"]: h["rating"] for h in st.session_state.horses}
+    winner = None
+    finish_order = []
+
+    while True:
+        for h in horse_names:
+            # 가속/감속 변동 포함
+            step = random.uniform(0.8, 1.3) * base_speed[h]
+            # 약간의 스퍼트 이벤트
+            if random.random() < 0.05:
+                step *= random.uniform(1.3, 1.6)
+            pos[h] = min(track_len, pos[h] + step)
+            pct = int(pos[h] / track_len * 100)
+            bars[h].progress(pct, text=f"🐎 {h}  |  {pct}%")
+            labels[h].markdown(f"**{pct}%**")
+
+            if pct >= 100 and h not in finish_order:
+                finish_order.append(h)
+
+        if finish_order:
+            winner = finish_order[0]
+        if all(p >= track_len for p in pos.values()):
+            break
+        time.sleep(tick_delay)
+
+    # 결과 & 배당 정산 (패리뮤추얼)
+    pool = total_pool(st.session_state.user_bets, st.session_state.bot_pool)
+    bet_on_winner = st.session_state.user_bets[winner] + st.session_state.bot_pool[winner]
+    payout_per_coin = pool / bet_on_winner if bet_on_winner > 0 else 0.0
+    user_win = st.session_state.user_bets[winner] * payout_per_coin
+    net = int(round(user_win))  # 소수점 절사
+
+    st.success(f"🏆 우승: **{winner}**  |  배당(1코인당): **{payout_per_coin:.2f}**")
+    if st.session_state.user_bets[winner] > 0:
+        st.balloons()
+        st.write(f"당신은 {winner}에 {st.session_state.user_bets[winner]} 코인을 걸었고 **{net} 코인**을 획득했습니다!")
+        st.session_state.balance += net
+    else:
+        st.write("아쉽지만 우승 말에 베팅하지 않았습니다. 다음을 노려봐요!")
+
+    # 히스토리 저장
+    st.session_state.history.append((winner, round(payout_per_coin, 2), net))
+    st.session_state.race_in_progress = False
+
+if start_race and not st.session_state.race_in_progress:
+    # 베팅 검증
+    if sum(st.session_state.user_bets.values()) == 0:
+        st.warning("최소 1코인 이상 베팅 후 시작하세요.")
+    else:
+        if sum(st.session_state.bot_pool.values()) == 0:
+            # 봇 베팅이 없다면 자동 생성
+            st.session_state.bot_pool = simulate_bots(st.session_state.user_bets)
+        run_race()
+
+if new_round and not st.session_state.race_in_progress:
+    reset_bets(keep_balance=True)
+    st.info("새 라운드를 시작합니다. 베팅을 다시 해주세요!")
+
+# -----------------------------
+# 기록
+# -----------------------------
+st.divider()
+st.subheader("📜 최근 라운드 기록")
+if st.session_state.history:
+    df_hist = pd.DataFrame(
+        [{"라운드": i+1, "우승": w, "배당(1코인)": p, "내 수익(+코인)": n}
+         for i, (w, p, n) in enumerate(st.session_state.history[::-1])]
+    )
+    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+else:
+    st.write("아직 기록이 없습니다. 첫 베팅을 시작해보세요!")
+
+st.caption("※ 이 앱은 오락용 시뮬레이션입니다. 실제 도박을 조장하지 않으며, 금전적 손실/이익이 발생하지 않습니다.")
